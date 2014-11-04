@@ -44,17 +44,27 @@
 static void secp256k1_ecmult_table_precomp_globalz_var(secp256k1_ge_t *pre, secp256k1_fe_t *rz, const secp256k1_gej_t *a) {
     secp256k1_gej_t prej[ECMULT_TABLE_SIZE(WINDOW_A)];
     secp256k1_fe_t zr[ECMULT_TABLE_SIZE(WINDOW_A) - 1];
+#ifdef USE_COZ
+    secp256k1_coz_t d;
+#else
     secp256k1_gej_t d;
+#endif
     secp256k1_fe_t zs;
     int i, j;
 
     CHECK(!a->infinity);
 
     /* Run basic ladder and collect the z-ratios. */
+#ifdef USE_COZ
+    secp256k1_coz_dblu_var(&d, &prej[0], a);
+    for (i = 1; i < ECMULT_TABLE_SIZE(WINDOW_A); i++)
+        secp256k1_coz_zaddu_var(&prej[i], &d, &zr[i-1], &prej[i-1]);
+#else
     prej[0] = *a;
     secp256k1_gej_double_var(&d, &prej[0], NULL);
     for (i = 1; i < ECMULT_TABLE_SIZE(WINDOW_A); i++)
         secp256k1_gej_add_var(&prej[i], &prej[i-1], &d, &zr[i-1]);
+#endif
 
     /* The z of the final point gives us the "global co-Z" for the table. */
     j = ECMULT_TABLE_SIZE(WINDOW_A) - 1;
@@ -93,13 +103,23 @@ static void secp256k1_ecmult_table_precomp_ge_storage_var(secp256k1_ge_storage_t
     secp256k1_gej_t *prej = checked_malloc(sizeof(secp256k1_gej_t) * table_size);
     secp256k1_ge_t *prea = checked_malloc(sizeof(secp256k1_ge_t) * table_size);
     secp256k1_fe_t *zr = checked_malloc(sizeof(secp256k1_fe_t) * table_size);
+#ifdef USE_COZ
+    secp256k1_coz_t d;
+#else
     secp256k1_gej_t d;
+#endif
     int i;
 
+#ifdef USE_COZ
+    secp256k1_coz_dblu_var(&d, &prej[0], a);
+    for (i = 1; i < table_size; i++)
+        secp256k1_coz_zaddu_var(&prej[i], &d, &zr[i-1], &prej[i-1]);
+#else
     prej[0] = *a;
     secp256k1_gej_double_var(&d, &prej[0], NULL);
     for (i = 1; i < table_size; i++)
         secp256k1_gej_add_var(&prej[i], &prej[i-1], &d, &zr[i-1]);
+#endif
     secp256k1_fe_inv_var(&zr[table_size-1], &prej[table_size-1].z);
     secp256k1_ge_set_table_gej(table_size, prea, prej, zr);
     free(zr);
