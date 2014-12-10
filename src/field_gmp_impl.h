@@ -76,13 +76,6 @@ SECP256K1_INLINE static int secp256k1_fe_is_odd(const secp256k1_fe_t *a) {
     return a->n[0] & 1;
 }
 
-SECP256K1_INLINE static int secp256k1_fe_equal(const secp256k1_fe_t *a, const secp256k1_fe_t *b) {
-    int ret = 1;
-    for (int i=0; i<FIELD_LIMBS+1; i++)
-        ret &= (a->n[i] == b->n[i]);
-    return ret;
-}
-
 SECP256K1_INLINE static int secp256k1_fe_cmp_var(const secp256k1_fe_t *a, const secp256k1_fe_t *b) {
     for (int i=FIELD_LIMBS; i>=0; i--) {
         if (a->n[i] > b->n[i]) return 1;
