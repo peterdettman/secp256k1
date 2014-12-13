@@ -18,8 +18,8 @@ AC_COMPILE_IFELSE([AC_LANG_PROGRAM([[
   __asm__ __volatile__("movq $0x100000000,%1; mulq %%rsi" : "+a"(a) : "S"(tmp) : "cc", "%rdx");
   ]])],[has_64bit_asm=yes],[has_64bit_asm=no])
 AC_MSG_RESULT([$has_64bit_asm])
-if test x"$set_field" == x"64bit_asm"; then
-  if test x"$has_64bit_asm" == x"no"; then
+if test x"$set_field" = x"64bit_asm"; then
+  if test x"$has_64bit_asm" = x"no"; then
     AC_MSG_ERROR([$set_field field support explicitly requested but no x86_64 assembly available])
   fi
 fi
@@ -30,15 +30,20 @@ AC_DEFUN([SECP_OPENSSL_CHECK],[
 if test x"$use_pkgconfig" = x"yes"; then
     : #NOP
   m4_ifdef([PKG_CHECK_MODULES],[
-    PKG_CHECK_MODULES([CRYPTO], [libcrypto], [has_libcrypto=yes; AC_DEFINE(HAVE_LIBCRYPTO,1,[Define this symbol if libcrypto is installed])],[has_libcrypto=no])
-    : #NOP
+    PKG_CHECK_MODULES([CRYPTO], [libcrypto], [has_libcrypto=yes],[has_libcrypto=no])
+    if test x"$has_libcrypto" = x"yes"; then
+      TEMP_LIBS="$LIBS"
+      LIBS="$LIBS $CRYPTO_LIBS"
+      AC_CHECK_LIB(crypto, main,[AC_DEFINE(HAVE_LIBCRYPTO,1,[Define this symbol if libcrypto is installed])],[has_libcrypto=no])
+      LIBS="$TEMP_LIBS"
+    fi
   ])
 else
   AC_CHECK_HEADER(openssl/crypto.h,[AC_CHECK_LIB(crypto, main,[has_libcrypto=yes; CRYPTO_LIBS=-lcrypto; AC_DEFINE(HAVE_LIBCRYPTO,1,[Define this symbol if libcrypto is installed])]
 )])
   LIBS=
 fi
-if test x"$has_libcrypto" == x"yes" && test x"$has_openssl_ec" = x; then
+if test x"$has_libcrypto" = x"yes" && test x"$has_openssl_ec" = x; then
   AC_MSG_CHECKING(for EC functions in libcrypto)
   AC_COMPILE_IFELSE([AC_LANG_PROGRAM([[
     #include <openssl/ec.h>
