@@ -59,6 +59,11 @@ static int secp256k1_fe_normalizes_to_zero(secp256k1_fe_t *r) {
     return secp256k1_fe_is_zero(r);
 }
 
+static int secp256k1_fe_normalizes_to_zero_var(secp256k1_fe_t *r) {
+    secp256k1_fe_normalize(r);
+    return secp256k1_fe_is_zero(r);
+}
+
 SECP256K1_INLINE static void secp256k1_fe_set_int(secp256k1_fe_t *r, int a) {
     r->n[0] = a;
     for (int i=1; i<FIELD_LIMBS+1; i++)
