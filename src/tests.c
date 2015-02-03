@@ -1003,22 +1003,26 @@ void test_ge(void) {
                 secp256k1_gej_t ra;
                 secp256k1_coz_t r;
 #endif
-                /* Normal doubling. */
+                /* Normal doubling with Z ratio result. */
                 secp256k1_gej_double_var(&resj, &gej[i1], &zr2);
                 ge_equals_gej(&ref, &resj);
                 /* Check Z ratio. */
                 secp256k1_fe_mul(&zr2, &zr2, &gej[i1].z);
                 CHECK(secp256k1_fe_equal_var(&zr2, &resj.z));
-                /* Normal doubling with Z ratio result. */
+                /* Normal doubling. */
                 secp256k1_gej_double_var(&resj, &gej[i2], NULL);
                 ge_equals_gej(&ref, &resj);
 #ifdef USE_COZ
-                /* Co-Z doubling. */
-                secp256k1_coz_dblu_var(&r, &ra, &gej[i1]);
+                /* Co-Z doubling with Z ratio result. */
+                secp256k1_coz_dblu_var(&r, &ra, &gej[i1], &zr2);
                 resj.x = r.x; resj.y = r.y; resj.z = ra.z; resj.infinity = ra.infinity;
                 ge_equals_gej(&ref, &resj);
                 ge_equals_gej(&ge[i1], &ra);
-                secp256k1_coz_dblu_var(&r, &ra, &gej[i2]);
+                /* Check Z ratio. */
+                secp256k1_fe_mul(&zr2, &zr2, &gej[i1].z);
+                CHECK(resj.infinity || secp256k1_fe_equal_var(&zr2, &ra.z));
+                /* Co-Z doubling. */
+                secp256k1_coz_dblu_var(&r, &ra, &gej[i2], &zr2);
                 resj.x = r.x; resj.y = r.y; resj.z = ra.z; resj.infinity = ra.infinity;
                 ge_equals_gej(&ref, &resj);
                 ge_equals_gej(&ge[i2], &ra);
@@ -1075,12 +1079,10 @@ void test_ge(void) {
         for (i = 0; i < 4 * runs + 1; i++) {
             /* Compute gej[i + 1].z / gez[i].z (with gej[n].z taken to be 1). */
             if (i < 4 * runs) {
-                secp256k1_fe_mul(&zr[i], &zinv[i], &gej[i + 1].z);
-            } else {
-                zr[i] = zinv[i];
+                secp256k1_fe_mul(&zr[i + 1], &zinv[i], &gej[i + 1].z);
             }
         }
-        secp256k1_ge_set_table_gej(4 * runs + 1, ge_set_table, gej, zr);
+        secp256k1_ge_set_table_gej_var(4 * runs + 1, ge_set_table, gej, zr);
         secp256k1_ge_set_all_gej_var(4 * runs + 1, ge_set_all, gej);
         for (i = 0; i < 4 * runs + 1; i++) {
             ge_equals_gej(&ge_set_table[i], &gej[i]);

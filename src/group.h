@@ -68,11 +68,17 @@ static void secp256k1_ge_set_gej(secp256k1_ge_t *r, secp256k1_gej_t *a);
 /** Set a batch of group elements equal to the inputs given in jacobian coordinates */
 static void secp256k1_ge_set_all_gej_var(size_t len, secp256k1_ge_t *r, const secp256k1_gej_t *a);
 
-/** Set a batch of group elements equal to the inputs given in jacobian coordinates (with known
- *  z-ratios). zr must contain the known z-ratios such that mul(a[i].z, zr[i]) == a[i+1].z, with
- *  mul(a[len-1].z, zr[len-1]) == 1 (i.e. the last zr element would normally be calculated by
- *  a field inversion of the last z element). */
-static void secp256k1_ge_set_table_gej(size_t len, secp256k1_ge_t *r, const secp256k1_gej_t *a, const secp256k1_fe_t *zr);
+/** Set a batch of group elements equal to the inputs given in jacobian
+ *  coordinates (with known z-ratios). zr must contain the known z-ratios such
+ *  that mul(a[i].z, zr[i+1]) == a[i+1].z. zr[0] is ignored. */
+static void secp256k1_ge_set_table_gej_var(size_t len, secp256k1_ge_t *r, const secp256k1_gej_t *a, const secp256k1_fe_t *zr);
+
+/** Bring a batch inputs given in jacobian coordinates (with known z-ratios) to
+ *  the same global z "denominator". zr must contain the known z-ratios such
+ *  that mul(a[i].z, zr[i+1]) == a[i+1].z. zr[0] is ignored. The x and y
+ *  coordinates of the result are stored in r, the common z coordinate is
+ *  stored in globalz. */
+static void secp256k1_ge_globalz_set_table_gej(size_t len, secp256k1_ge_t *r, secp256k1_fe_t *globalz, const secp256k1_gej_t *a, const secp256k1_fe_t *zr);
 
 /** Set a group element (jacobian) equal to the point at infinity. */
 static void secp256k1_gej_set_infinity(secp256k1_gej_t *r);
@@ -133,8 +139,9 @@ static void secp256k1_ge_from_storage(secp256k1_ge_t *r, const secp256k1_ge_stor
 static void secp256k1_ge_storage_cmov(secp256k1_ge_storage_t *r, const secp256k1_ge_storage_t *a, int flag);
 
 #ifdef USE_COZ
-/** Set r equal to the double of a, and ra equal to a, such that r is co-z with ra. */
-static void secp256k1_coz_dblu_var(secp256k1_coz_t *r, secp256k1_gej_t *ra, const secp256k1_gej_t *a);
+/** Set r equal to the double of a, and ra equal to a, such that r is co-z with ra. rzr
+ *  returns the ratio ra->z:a->z. */
+static void secp256k1_coz_dblu_var(secp256k1_coz_t *r, secp256k1_gej_t *ra, const secp256k1_gej_t *a, secp256k1_fe_t *rzr);
 
 /** Set r equal to the sum of ra and b. ra is initially co-z with b and finally co-z with r. rzr
     returns the ratio r->z:b->z */

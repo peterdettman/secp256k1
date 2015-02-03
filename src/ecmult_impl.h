@@ -27,107 +27,77 @@
 /** The number of entries a table with precomputed multiples needs to have. */
 #define ECMULT_TABLE_SIZE(w) (1 << ((w)-2))
 
-/** Fill a table 'pre' with precomputed odd multiples of a. W determines the size of the table.
- *  pre will contains the values [1*a,3*a,5*a,...,(2^(w-1)-1)*a], so it needs place for
- *  2^(w-2) entries.
+/** Fill a table 'prej' with precomputed odd multiples of a. Prej will contain
+ *  the values [1*a,3*a,...,(2*n-1)*a], so it space for n values. zr[0] will
+ *  contain prej[0].z / a.z. The other zr[i] values = prej[i].z / prej[i-1].z.
+ */
+static void secp256k1_ecmult_odd_multiples_table(int n, secp256k1_gej_t *prej, secp256k1_fe_t *zr, const secp256k1_gej_t *a) {
+#ifdef USE_COZ
+    secp256k1_coz_t d;
+    int i;
+
+    VERIFY_CHECK(!a->infinity);
+
+    secp256k1_coz_dblu_var(&d, &prej[0], a, &zr[0]);
+    for (i = 1; i < n; i++)
+        secp256k1_coz_zaddu_var(&prej[i], &d, &zr[i], &prej[i-1]);
+#else
+    secp256k1_gej_t d;
+    int i;
+
+    VERIFY_CHECK(!a->infinity);
+
+    prej[0] = *a;
+    secp256k1_gej_double_var(&d, &prej[0], NULL);
+    secp256k1_fe_set_int(zr, 1);
+    for (i = 1; i < n; i++)
+        secp256k1_gej_add_var(&prej[i], &prej[i-1], &d, &zr[i]);
+#endif
+}
+
+/** Fill a table 'pre' with precomputed odd multiples of a.
  *
  *  There are two versions of this function:
- *  - secp256k1_ecmult_table_precomp_globalz_var, which brings its resulting
- *    point set to a single constant Z denominator, stores the X and Y
- *    coordinates as affine points in pre, and stores the global Z in rz.
- *  - secp256k1_ecmult_table_precomp_ge_var, which converts its resulting point
- *    set to actually affine points, and stores those in pre.
+ *  - secp256k1_ecmult_odd_multiples_table_globalz_windowa which brings its
+ *    resulting point set to a single constant Z denominator, stores the X and Y
+ *    coordinates as ge_storage points in pre, and stores the global Z in rz.
+ *    It only operates on tables sized for WINDOW_A wnaf multiples.
+ *  - secp256k1_ecmult_odd_multiples_table_storage_var, which converts its
+ *    resulting point set to actually affine points, and stores those in pre.
+ *    It operates on tables of any size, but uses heap-allocated temporaries.
+ *
  *  To compute a*P + b*G, we compute a table for P using the first function,
  *  and for G using the second (which requires an inverse, but it only needs to
  *  happen once).
  */
-static void secp256k1_ecmult_table_precomp_globalz_var(secp256k1_ge_t *pre, secp256k1_fe_t *rz, const secp256k1_gej_t *a) {
+static void secp256k1_ecmult_odd_multiples_table_globalz_windowa(secp256k1_ge_t *pre, secp256k1_fe_t *globalz, const secp256k1_gej_t *a) {
     secp256k1_gej_t prej[ECMULT_TABLE_SIZE(WINDOW_A)];
-    secp256k1_fe_t zr[ECMULT_TABLE_SIZE(WINDOW_A) - 1];
-#ifdef USE_COZ
-    secp256k1_coz_t d;
-#else
-    secp256k1_gej_t d;
-#endif
-    secp256k1_fe_t zs;
-    int i, j;
+    secp256k1_fe_t zr[ECMULT_TABLE_SIZE(WINDOW_A)];
 
-    CHECK(!a->infinity);
-
-    /* Run basic ladder and collect the z-ratios. */
-#ifdef USE_COZ
-    secp256k1_coz_dblu_var(&d, &prej[0], a);
-    for (i = 1; i < ECMULT_TABLE_SIZE(WINDOW_A); i++)
-        secp256k1_coz_zaddu_var(&prej[i], &d, &zr[i-1], &prej[i-1]);
-#else
-    prej[0] = *a;
-    secp256k1_gej_double_var(&d, &prej[0], NULL);
-    for (i = 1; i < ECMULT_TABLE_SIZE(WINDOW_A); i++)
-        secp256k1_gej_add_var(&prej[i], &prej[i-1], &d, &zr[i-1]);
-#endif
-
-    /* The z of the final point gives us the "global co-Z" for the table. */
-    j = ECMULT_TABLE_SIZE(WINDOW_A) - 1;
-    pre[j].x = prej[j].x;
-    pre[j].y = prej[j].y;
-         *rz = prej[j].z;
-    pre[j].infinity = 0;
-
-#ifdef VERIFY
-    secp256k1_fe_normalize_weak(rz);
-#endif
-
-    /* Work our way backwards, using the z-ratios to scale the x/y values. */
-    secp256k1_fe_set_int(&zs, 1);
-    while (--j >= 0) {
-        secp256k1_fe_t zs2, zs3;
-        secp256k1_fe_mul(&zs, &zs, &zr[j]);
-        secp256k1_fe_sqr(&zs2, &zs);
-        secp256k1_fe_mul(&zs3, &zs2, &zs);
-        secp256k1_fe_mul(&pre[j].x, &prej[j].x, &zs2);
-        secp256k1_fe_mul(&pre[j].y, &prej[j].y, &zs3);
-        pre[j].infinity = 0;
-
-#ifdef VERIFY
-        {
-            secp256k1_fe_t z;
-            secp256k1_fe_mul(&z, &zs, &prej[j].z);
-            VERIFY_CHECK(secp256k1_fe_equal_var(&z, rz));
-        }
-#endif
-    }
+    /* Compute the odd multiples in Jacobian form. */
+    secp256k1_ecmult_odd_multiples_table(ECMULT_TABLE_SIZE(WINDOW_A), prej, zr, a);
+    /* Bring them to the same Z denominator. */
+    secp256k1_ge_globalz_set_table_gej(ECMULT_TABLE_SIZE(WINDOW_A), pre, globalz, prej, zr);
 }
 
-static void secp256k1_ecmult_table_precomp_ge_storage_var(secp256k1_ge_storage_t *pre, const secp256k1_gej_t *a, int w) {
-    const int table_size = ECMULT_TABLE_SIZE(w);
-    secp256k1_gej_t *prej = checked_malloc(sizeof(secp256k1_gej_t) * table_size);
-    secp256k1_ge_t *prea = checked_malloc(sizeof(secp256k1_ge_t) * table_size);
-    secp256k1_fe_t *zr = checked_malloc(sizeof(secp256k1_fe_t) * table_size);
-#ifdef USE_COZ
-    secp256k1_coz_t d;
-#else
-    secp256k1_gej_t d;
-#endif
+static void secp256k1_ecmult_odd_multiples_table_storage_var(int n, secp256k1_ge_storage_t *pre, const secp256k1_gej_t *a) {
+    secp256k1_gej_t *prej = checked_malloc(sizeof(secp256k1_gej_t) * n);
+    secp256k1_ge_t *prea = checked_malloc(sizeof(secp256k1_ge_t) * n);
+    secp256k1_fe_t *zr = checked_malloc(sizeof(secp256k1_fe_t) * n);
     int i;
 
-#ifdef USE_COZ
-    secp256k1_coz_dblu_var(&d, &prej[0], a);
-    for (i = 1; i < table_size; i++)
-        secp256k1_coz_zaddu_var(&prej[i], &d, &zr[i-1], &prej[i-1]);
-#else
-    prej[0] = *a;
-    secp256k1_gej_double_var(&d, &prej[0], NULL);
-    for (i = 1; i < table_size; i++)
-        secp256k1_gej_add_var(&prej[i], &prej[i-1], &d, &zr[i-1]);
-#endif
-    secp256k1_fe_inv_var(&zr[table_size-1], &prej[table_size-1].z);
-    secp256k1_ge_set_table_gej(table_size, prea, prej, zr);
-    free(zr);
-    free(prej);
-    for (i = 0; i < table_size; i++) {
+    /* Compute the odd multiples in Jacobian form. */
+    secp256k1_ecmult_odd_multiples_table(n, prej, zr, a);
+    /* Convert them in batch to affine coordinates. */
+    secp256k1_ge_set_table_gej_var(n, prea, prej, zr);
+    /* Convert them to compact storage form. */
+    for (i = 0; i < n; i++) {
         secp256k1_ge_to_storage(&pre[i], &prea[i]);
     }
+
     free(prea);
+    free(prej);
+    free(zr);
 }
 
 /** The following two macro retrieves a particular odd multiple from a table
@@ -141,6 +111,7 @@ static void secp256k1_ecmult_table_precomp_ge_storage_var(secp256k1_ge_storage_t
     else \
         secp256k1_ge_neg((r), &(pre)[(-(n)-1)/2]); \
 } while(0)
+
 #define ECMULT_TABLE_GET_GE_STORAGE(r,pre,n,w) do { \
     VERIFY_CHECK(((n) & 1) == 1); \
     VERIFY_CHECK((n) >= -((1 << ((w)-1)) - 1)); \
@@ -176,7 +147,7 @@ static void secp256k1_ecmult_start(void) {
     secp256k1_gej_set_ge(&gj, &secp256k1_ge_const_g);
 
     /* precompute the tables with odd multiples */
-    secp256k1_ecmult_table_precomp_ge_storage_var(ret->pre_g, &gj, WINDOW_G);
+    secp256k1_ecmult_odd_multiples_table_storage_var(ECMULT_TABLE_SIZE(WINDOW_G), ret->pre_g, &gj);
 
 #ifdef USE_ENDOMORPHISM
     {
@@ -186,7 +157,7 @@ static void secp256k1_ecmult_start(void) {
         g_128j = gj;
         for (i = 0; i < 128; i++)
             secp256k1_gej_double_var(&g_128j, &g_128j, NULL);
-        secp256k1_ecmult_table_precomp_ge_storage_var(ret->pre_g_128, &g_128j, WINDOW_G);
+        secp256k1_ecmult_odd_multiples_table_storage_var(ECMULT_TABLE_SIZE(WINDOW_G), ret->pre_g_128, &g_128j);
     }
 #endif
 
@@ -302,7 +273,7 @@ static void secp256k1_ecmult(secp256k1_gej_t *r, const secp256k1_gej_t *a, const
      * of 1/Z, so we can use secp256k1_gej_add_zinv_var, which uses the same
      * isomorphism to efficiently add with a known Z inverse.
      */
-    secp256k1_ecmult_table_precomp_globalz_var(pre_a, &Z, a);
+    secp256k1_ecmult_odd_multiples_table_globalz_windowa(pre_a, &Z, a);
 
 #ifdef USE_ENDOMORPHISM
     for (i = 0; i < ECMULT_TABLE_SIZE(WINDOW_A); i++)
