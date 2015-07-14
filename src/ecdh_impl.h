@@ -19,6 +19,27 @@
 #endif
 #define WNAF_SIZE(w) ((WNAF_BITS + (w) - 1) / (w))
 
+/* This is like `ECMULT_TABLE_GET_GE` but is constant time */
+#define ECDH_TABLE_GET_GE(r,pre,n,w) do { \
+    int m; \
+    int abs_n = (n) * (((n) > 0) * 2 - 1); \
+    secp256k1_fe_t neg_y; \
+    VERIFY_CHECK(((n) & 1) == 1); \
+    VERIFY_CHECK((n) >= -((1 << ((w)-1)) - 1)); \
+    VERIFY_CHECK((n) <=  ((1 << ((w)-1)) - 1)); \
+    for (m = 1; m < (1 << ((w) - 1)); m += 2) { \
+        /* This loop is used to avoid secret data in array indices. See
+         * the comment in ecmult_gen_impl.h for rationale. */ \
+        secp256k1_fe_cmov(&(r)->x, &(pre)[(m - 1) / 2].x, m == abs_n); \
+        secp256k1_fe_cmov(&(r)->y, &(pre)[(m - 1) / 2].y, m == abs_n); \
+    } \
+    (r)->infinity = 0; \
+    secp256k1_fe_normalize_weak(&(r)->x); \
+    secp256k1_fe_normalize_weak(&(r)->y); \
+    secp256k1_fe_negate(&neg_y, &(r)->y, 1); \
+    secp256k1_fe_cmov(&(r)->y, &neg_y, (n) != abs_n); \
+} while(0)
+
 /** Convert a number to WNAF notation. The number becomes represented by sum(2^{wi} * wnaf[i], i=0..return_val)
  *  with the following guarantees:
  *  - each wnaf[i] an odd integer between -(1 << w) and (1 << w)
@@ -161,18 +182,18 @@ static void secp256k1_point_multiply(secp256k1_gej_t *r, const secp256k1_ge_t *a
         }
 #ifdef USE_ENDOMORPHISM
         n = wnaf_1[i];
-        ECMULT_TABLE_GET_GE(&tmpa, pre_a, n, WINDOW_A);
+        ECDH_TABLE_GET_GE(&tmpa, pre_a, n, WINDOW_A);
         VERIFY_CHECK(n != 0);
         secp256k1_gej_add_ge(r, r, &tmpa);
 
         n = wnaf_lam[i];
-        ECMULT_TABLE_GET_GE(&tmpa, pre_a_lam, n, WINDOW_A);
+        ECDH_TABLE_GET_GE(&tmpa, pre_a_lam, n, WINDOW_A);
         VERIFY_CHECK(n != 0);
         secp256k1_gej_add_ge(r, r, &tmpa);
 #else
         n = wnaf[i];
         VERIFY_CHECK(n != 0);
-        ECMULT_TABLE_GET_GE(&tmpa, pre_a, n, WINDOW_A);
+        ECDH_TABLE_GET_GE(&tmpa, pre_a, n, WINDOW_A);
         secp256k1_gej_add_ge(r, r, &tmpa);
 #endif
     }
