@@ -57,8 +57,10 @@
 /* Like DEBUG_CHECK(), but when VERIFY is defined instead of NDEBUG not defined. */
 #ifdef VERIFY
 #define VERIFY_CHECK CHECK
+#define VERIFY_SETUP(stmt) do { stmt; } while(0)
 #else
 #define VERIFY_CHECK(cond) do { (void)(cond); } while(0)
+#define VERIFY_SETUP(stmt)
 #endif
 
 static SECP256K1_INLINE void *checked_malloc(size_t size) {
