@@ -32,28 +32,40 @@ struct secp256k1_aggsig_context_struct {
     secp256k1_rfc6979_hmac_sha256_t rng;
 };
 
-static int secp256k1_compute_sighash(const secp256k1_context *ctx, secp256k1_scalar *r, const secp256k1_pubkey *pubkeys, size_t n_pubkeys, size_t index, const unsigned char *msghash32) {
-    int overflow;
+/* Compute the hash of all the data that every pubkey needs to sign */
+static void secp256k1_compute_prehash(const secp256k1_context *ctx, unsigned char *output, const secp256k1_pubkey *pubkeys, size_t n_pubkeys, secp256k1_ge *nonce_ge, const unsigned char *msghash32) {
     size_t i;
-    unsigned char output[32];
+    unsigned char buf[33];
+    size_t buflen = sizeof(buf);
     secp256k1_sha256_t hasher;
     secp256k1_sha256_initialize(&hasher);
-    /* Encode index as a UTF8-style bignum */
-    do {
-        unsigned char ch = index & 0x7f;
-        secp256k1_sha256_write(&hasher, &ch, 1);
-        index >>= 7;
-    } while (index > 0);
     /* Encode pubkeys */
     for (i = 0; i < n_pubkeys; i++) {
-        unsigned char buf[33];
-        size_t buflen = sizeof(buf);
         CHECK(secp256k1_ec_pubkey_serialize(ctx, buf, &buflen, &pubkeys[i], SECP256K1_EC_COMPRESSED));
         secp256k1_sha256_write(&hasher, buf, sizeof(buf));
     }
+    /* Encode nonce */
+    CHECK(secp256k1_eckey_pubkey_serialize(nonce_ge, buf, &buflen, 1));
+    secp256k1_sha256_write(&hasher, buf, sizeof(buf));
     /* Encode message */
     secp256k1_sha256_write(&hasher, msghash32, 32);
     /* Finish */
+    secp256k1_sha256_finalize(&hasher, output);
+}
+
+/* Add the index to the above hash to customize it for each pubkey */
+static int secp256k1_compute_sighash(secp256k1_scalar *r, const unsigned char *prehash, size_t index) {
+    unsigned char output[32];
+    int overflow;
+    secp256k1_sha256_t hasher;
+    secp256k1_sha256_initialize(&hasher);
+    /* Encode index as a UTF8-style bignum */
+    while (index > 0) {
+        unsigned char ch = index & 0x7f;
+        secp256k1_sha256_write(&hasher, &ch, 1);
+        index >>= 7;
+    }
+    secp256k1_sha256_write(&hasher, prehash, 32);
     secp256k1_sha256_finalize(&hasher, output);
     secp256k1_scalar_set_b32(r, output, &overflow);
     return !overflow;
@@ -116,7 +128,9 @@ int secp256k1_aggsig_partial_sign(const secp256k1_context* ctx, secp256k1_aggsig
     size_t i;
     secp256k1_scalar sighash;
     secp256k1_scalar sec;
+    secp256k1_ge tmp_ge;
     int overflow;
+    unsigned char prehash[32];
 
     VERIFY_CHECK(ctx != NULL);
     ARG_CHECK(secp256k1_ecmult_gen_context_is_built(&ctx->ecmult_gen_ctx));
@@ -140,11 +154,14 @@ int secp256k1_aggsig_partial_sign(const secp256k1_context* ctx, secp256k1_aggsig
     /* If the total public nonce has wrong sign, negate our
      * secret nonce. Everyone will negate the public one
      * at combine time. */
+    secp256k1_ge_set_gej(&tmp_ge, &aggctx->pubnonce_sum);  /* TODO cache this */
     if (!secp256k1_gej_has_quad_y_var(&aggctx->pubnonce_sum)) {
         secp256k1_scalar_negate(&aggctx->secnonce[index], &aggctx->secnonce[index]);
+        secp256k1_ge_neg(&tmp_ge, &tmp_ge);
     }
 
-    if (secp256k1_compute_sighash(ctx, &sighash, aggctx->pubkeys, aggctx->n_sigs, index, msghash32) == 0) {
+    secp256k1_compute_prehash(ctx, prehash, aggctx->pubkeys, aggctx->n_sigs, &tmp_ge, msghash32);
+    if (secp256k1_compute_sighash(&sighash, prehash, index) == 0) {
         return 0;
     }
     secp256k1_scalar_set_b32(&sec, seckey32, &overflow);
@@ -210,6 +227,7 @@ int secp256k1_aggsig_verify(const secp256k1_context* ctx, const unsigned char *s
     size_t i;
     size_t offset;
     int overflow;
+    unsigned char prehash[32];
 
     VERIFY_CHECK(ctx != NULL);
     ARG_CHECK(sig64 != NULL);
@@ -236,6 +254,7 @@ int secp256k1_aggsig_verify(const secp256k1_context* ctx, const unsigned char *s
     secp256k1_scalar_set_int(&sc[1], 1);
     secp256k1_ge_set_xquad(&ge_tmp, &fe_tmp);
     secp256k1_gej_set_ge(&pt[1], &ge_tmp);
+    secp256k1_compute_prehash(ctx, prehash, pubkeys, n_pubkeys, &ge_tmp, msg32);
 
     i = 0;
     offset = 2;
@@ -246,7 +265,7 @@ int secp256k1_aggsig_verify(const secp256k1_context* ctx, const unsigned char *s
 
         /* TODO if n = 1 or 2 then we should use `secp256k1_ecmult` (and require an appropriate ctx) */
         for (j = 0; j < n; j++) {
-            if (secp256k1_compute_sighash(ctx, &sc[j + offset], pubkeys, n_pubkeys, i + j, msg32) == 0) {
+            if (secp256k1_compute_sighash(&sc[j + offset], prehash, i + j) == 0) {
                 return 0;
             }
             secp256k1_pubkey_load(ctx, &ge_tmp, &pubkeys[i + j]);
