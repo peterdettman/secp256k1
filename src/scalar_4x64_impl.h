@@ -96,6 +96,13 @@ static int secp256k1_scalar_add(secp256k1_scalar *r, const secp256k1_scalar *a, 
     return overflow;
 }
 
+static void secp256k1_scalar_numsub(secp256k1_scalar *r, const secp256k1_scalar *a, const secp256k1_scalar *b) {
+    r->d[3] = a->d[3] - b->d[3] - (a->d[2] < b->d[2]);
+    r->d[2] = a->d[2] - b->d[2] - (a->d[1] < b->d[1]);
+    r->d[1] = a->d[1] - b->d[1] - (a->d[0] < b->d[0]);
+    r->d[0] = a->d[0] - b->d[0];
+}
+
 static void secp256k1_scalar_cadd_bit(secp256k1_scalar *r, unsigned int bit, int flag) {
     uint128_t t;
     VERIFY_CHECK(bit < 256);

@@ -83,9 +83,7 @@ static void secp256k1_ecmult_multi(secp256k1_gej *r, secp256k1_scalar *sc, secp2
          * be small. */
         secp256k1_gej_add_var(&pt[max2i], &pt[max1i], &pt[max2i], NULL);  /* Y -> X + Y */
         if (!secp256k1_scalar_eq(&sc[max1i], &sc[max2i])) {
-            secp256k1_scalar neg2i;
-            secp256k1_scalar_negate(&neg2i, &sc[max2i]);
-            secp256k1_scalar_add(&sc[max1i], &sc[max1i], &neg2i);         /* n -> n - m */
+            secp256k1_scalar_numsub(&sc[max1i], &sc[max1i], &sc[max2i]);  /* n -> n - m */
             secp256k1_heap_insert(sc, heap_idx, &heap_n, max1i);
         }
     }
