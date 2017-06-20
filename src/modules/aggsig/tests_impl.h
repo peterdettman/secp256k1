@@ -19,7 +19,7 @@ void test_aggsig_api(void) {
     secp256k1_pubkey pubkeys[5];
     secp256k1_aggsig_partial_signature partials[5];
     secp256k1_aggsig_context *aggctx;
-    unsigned char seed[32];
+    unsigned char seed[32] = { 1, 2, 3, 4, 0 };
     unsigned char sig[64];
     unsigned char *msg = seed;  /* shh ;) */
     int32_t ecount = 0;
