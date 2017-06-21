@@ -2741,9 +2741,11 @@ void run_heap(void){
     random_group_element_test(&ptg);
     secp256k1_gej_set_ge(&pt[0], &ptg);
 
-    secp256k1_heap_insert(sc, heap_idx, &heap_n, 0);
+    heap_n = 1;
+    heap_idx[0] = 0;
+    secp256k1_heapify(sc, heap_idx, heap_n);
     CHECK(heap_n == 1);
-    CHECK(secp256k1_heap_remove(sc, heap_idx, &heap_n) == 0);
+    secp256k1_heap_remove(sc, heap_idx, &heap_n);
     CHECK(heap_n == 0);
 
     /* Multi-item stack */
@@ -2751,14 +2753,17 @@ void run_heap(void){
         random_scalar_order(&sc[i]);
         random_group_element_test(&ptg);
         secp256k1_gej_set_ge(&pt[i], &ptg);
-        secp256k1_heap_insert(sc, heap_idx, &heap_n, i);
-        CHECK(heap_n == i + 1);
+        heap_idx[i] = i;
     }
+    heap_n = i;
+    secp256k1_heapify(sc, heap_idx, heap_n);
 
-    idx1 = secp256k1_heap_remove(sc, heap_idx, &heap_n);
+    idx1 = heap_idx[0];
+    secp256k1_heap_remove(sc, heap_idx, &heap_n);
     CHECK(heap_n == 19);
     for (i = 0; i < 19; i++) {
-        idx2 = secp256k1_heap_remove(sc, heap_idx, &heap_n);
+        idx2 = heap_idx[0];
+        secp256k1_heap_remove(sc, heap_idx, &heap_n);
         CHECK(heap_n == 18 - i);
         CHECK(secp256k1_scalar_cmp_var(&sc[idx2], &sc[idx1]) <= 0);
         idx1 = idx2;
@@ -2769,18 +2774,20 @@ void run_heap(void){
         random_scalar_order(&sc[i]);
         random_group_element_test(&ptg);
         secp256k1_gej_set_ge(&pt[i], &ptg);
-        secp256k1_heap_insert(sc, heap_idx, &heap_n, i);
-        CHECK(heap_n == i + 1);
+        heap_idx[i] = i;
     }
     for (; i < 20; i++) {
-        secp256k1_heap_insert(sc, heap_idx, &heap_n, i % 7);
-        CHECK(heap_n == i + 1);
+        heap_idx[i] = i % 7;
     }
+    heap_n = i;
+    secp256k1_heapify(sc, heap_idx, heap_n);
 
-    idx1 = secp256k1_heap_remove(sc, heap_idx, &heap_n);
+    idx1 = heap_idx[0];
+    secp256k1_heap_remove(sc, heap_idx, &heap_n);
     CHECK(heap_n == 19);
     for (i = 0; i < 19; i++) {
-        idx2 = secp256k1_heap_remove(sc, heap_idx, &heap_n);
+        idx2 = heap_idx[0];
+        secp256k1_heap_remove(sc, heap_idx, &heap_n);
         CHECK(heap_n == 18 - i);
         CHECK(secp256k1_scalar_cmp_var(&sc[idx2], &sc[idx1]) <= 0);
         idx1 = idx2;
