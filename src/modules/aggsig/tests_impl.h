@@ -41,7 +41,7 @@ void test_aggsig_api(void) {
         CHECK(secp256k1_ec_pubkey_create(ctx, &pubkeys[i], seckeys[i]) == 1);
     }
 
-    aggctx = secp256k1_aggsig_context_create(none, pubkeys, 10, seed);
+    aggctx = secp256k1_aggsig_context_create(none, pubkeys, 5, seed);
     CHECK(ecount == 0);
     CHECK(aggctx != NULL);
     secp256k1_aggsig_context_destroy(NULL);  /* harmless */
