@@ -218,6 +218,21 @@ int secp256k1_aggsig_combine_signatures(const secp256k1_context* ctx, secp256k1_
     return 1;
 }
 
+SECP256K1_INLINE static void secp256k1_aggsig_endo_split(secp256k1_scalar *s1, secp256k1_scalar *s2, secp256k1_gej *p1, secp256k1_gej *p2) {
+    secp256k1_scalar tmp = *s1;
+    secp256k1_scalar_split_lambda(s1, s2, &tmp);
+    secp256k1_gej_mul_lambda(p2, p1);
+
+    if (secp256k1_scalar_is_high(s1)) {
+        secp256k1_scalar_negate(s1, s1);
+        secp256k1_gej_neg(p1, p1);
+    }
+    if (secp256k1_scalar_is_high(s2)) {
+        secp256k1_scalar_negate(s2, s2);
+        secp256k1_gej_neg(p2, p2);
+    }
+}
+
 int secp256k1_aggsig_verify(const secp256k1_context* ctx, const unsigned char *sig64, const unsigned char *msg32, const secp256k1_pubkey *pubkeys, size_t n_pubkeys) {
     secp256k1_gej pt[SECP256K1_ECMULT_MULTI_MAX_N];
     secp256k1_scalar sc[SECP256K1_ECMULT_MULTI_MAX_N];
@@ -257,6 +272,31 @@ int secp256k1_aggsig_verify(const secp256k1_context* ctx, const unsigned char *s
     secp256k1_compute_prehash(ctx, prehash, pubkeys, n_pubkeys, &ge_tmp, msg32);
 
     i = 0;
+#ifdef USE_ENDOMORPHISM
+    secp256k1_aggsig_endo_split(&sc[0], &sc[2], &pt[0], &pt[2]);
+    offset = 3;
+    while (i < n_pubkeys) {
+        size_t n = (2*(n_pubkeys - i) < SECP256K1_ECMULT_MULTI_MAX_N - offset) ? 2*(n_pubkeys - i) : SECP256K1_ECMULT_MULTI_MAX_N - offset;
+        size_t j;
+        secp256k1_gej multi;
+
+        /* TODO if n = 1 or 2 then we should use `secp256k1_ecmult` (and require an appropriate ctx) */
+        for (j = 0; j < n/2; j++) {
+            if (secp256k1_compute_sighash(&sc[2*j + offset], prehash, i + j) == 0) {
+                return 0;
+            }
+            secp256k1_pubkey_load(ctx, &ge_tmp, &pubkeys[i + j]);
+            secp256k1_gej_set_ge(&pt[2*j + offset], &ge_tmp);
+
+            secp256k1_aggsig_endo_split(&sc[2*j + offset], &sc[2*j + 1 + offset], &pt[2*j + offset], &pt[2*j + 1 + offset]);
+        }
+        secp256k1_ecmult_multi(&multi, sc, pt, n + offset);
+        secp256k1_gej_add_var(&pk_sum, &pk_sum, &multi, NULL);
+
+        i += n / 2;
+        offset = 0;
+    }
+#else
     offset = 2;
     while (i < n_pubkeys) {
         size_t n = (n_pubkeys - i < SECP256K1_ECMULT_MULTI_MAX_N - offset) ? n_pubkeys - i : SECP256K1_ECMULT_MULTI_MAX_N - offset;
@@ -277,6 +317,7 @@ int secp256k1_aggsig_verify(const secp256k1_context* ctx, const unsigned char *s
         i += n;
         offset = 0;
     }
+#endif
 
     return secp256k1_gej_is_infinity(&pk_sum);
 }
