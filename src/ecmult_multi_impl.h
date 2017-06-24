@@ -6,6 +6,196 @@
 
 #include "ecmult_multi.h"
 
+#define MY_VERSION 1
+
+#if MY_VERSION
+
+typedef struct {
+    unsigned char tree[SECP256K1_ECMULT_MULTI_MAX_N];
+    const secp256k1_scalar *scalars;
+    size_t size;
+} MY_scalar_heap;
+
+static void MY_sift_down(MY_scalar_heap *heap, size_t node, unsigned char index) {
+    unsigned char child_index, other_index;
+    size_t child, other, half_size = heap->size >> 1;
+    const secp256k1_scalar *sc = heap->scalars;
+
+    while (node < half_size) {
+        /* Initially assume the left child is the larger child */
+        child = (node << 1) + 1;
+        child_index = heap->tree[child];
+
+        /* If there is a right child, check whether it's larger than the left */
+        other = child + 1;
+        if (other < heap->size) {
+            other_index = heap->tree[other];
+            if (secp256k1_scalar_cmp_var(&sc[other_index], &sc[child_index]) > 0) {
+                child = other;
+                child_index = other_index;
+            }
+        }
+
+        /* If the current node is larger than its largest child, stop at this level */
+        if (secp256k1_scalar_cmp_var(&sc[index], &sc[child_index]) > 0) {
+            break;
+        }
+
+        /* Move the larger child up, and recurse from its previous position */
+        heap->tree[node] = child_index;
+        node = child;
+    }
+
+    heap->tree[node] = index;
+}
+
+static void MY_sift_up(MY_scalar_heap *heap, size_t node, unsigned char index) {
+    size_t parent;
+    unsigned char parent_index;
+    const secp256k1_scalar *sc = heap->scalars;
+
+    while (node > 0) {
+        parent = (node - 1) >> 1;
+        parent_index = heap->tree[parent];
+
+        /* If the current node is not larger than its parent, stop at this level */
+        if (secp256k1_scalar_cmp_var(&sc[index], &sc[parent_index]) <= 0) {
+            break;
+        }
+
+        /* Move the parent down, and recurse from its previous position */
+        heap->tree[node] = parent_index;
+        node = parent;
+    }
+
+    heap->tree[node] = index;
+}
+
+static void MY_sift_floyd(MY_scalar_heap *heap, size_t node, unsigned char index) {
+    unsigned char child_index, other_index;
+    size_t child, other, half_size = heap->size >> 1;
+    const secp256k1_scalar *sc = heap->scalars;
+
+    while (node < half_size) {
+        /* Initially assume the left child is the larger child */
+        child = (node << 1) + 1;
+        child_index = heap->tree[child];
+
+        /* If there is a right child, check whether it's larger than the left */
+        other = child + 1;
+        if (other < heap->size) {
+            other_index = heap->tree[other];
+            if (secp256k1_scalar_cmp_var(&sc[other_index], &sc[child_index]) > 0) {
+                child = other;
+                child_index = other_index;
+            }
+        }
+
+        /* Move the larger child up, and recurse from its previous position */
+        heap->tree[node] = child_index;
+        node = child;
+    }
+
+    MY_sift_up(heap, node, index);
+}
+
+SECP256K1_INLINE static void MY_heapify(MY_scalar_heap *heap) {
+    size_t root = heap->size >> 1;;
+    while (root-- > 0) {
+        MY_sift_down(heap, root, heap->tree[root]);
+    }
+}
+
+static void MY_initialize(MY_scalar_heap *heap, const secp256k1_scalar *scalars, size_t n) {
+    size_t i, size = 0;
+
+    VERIFY_CHECK(n <= SECP256K1_ECMULT_MULTI_MAX_N);
+
+    for (i = 0; i < n; ++i) {
+        if (!secp256k1_scalar_is_zero(&scalars[i])) {
+            heap->tree[size++] = i;
+        }
+    }
+
+    heap->scalars = scalars;
+    heap->size = size;
+
+    MY_heapify(heap);
+}
+
+SECP256K1_INLINE static unsigned char MY_replace(MY_scalar_heap *heap, unsigned char index) {
+    unsigned char result = heap->tree[0];
+    VERIFY_CHECK(heap->size > 0);
+    MY_sift_floyd(heap, 0, index);
+    return result;
+}
+
+SECP256K1_INLINE static unsigned char MY_remove(MY_scalar_heap *heap) {
+    unsigned char result = heap->tree[0];
+    VERIFY_CHECK(heap->size > 0);
+    if (--heap->size > 0) {
+        MY_sift_down(heap, 0, heap->tree[heap->size]);
+    }
+    return result;
+}
+
+/** Multi-multiply: R = sum_i ni * Ai */
+static void secp256k1_ecmult_multi(secp256k1_gej *r, secp256k1_scalar *sc, secp256k1_gej *pt, size_t n) {
+    MY_scalar_heap heap;
+    unsigned char first, second;
+
+    secp256k1_gej_set_infinity(r);
+    MY_initialize(&heap, sc, n);
+
+    if (heap.size == 0) {
+        return;
+    }
+
+    first = MY_remove(&heap);
+
+    while (heap.size > 0) {
+        second = heap.tree[0];        
+
+        do {
+            /* Observe that nX + mY = (n-m)X + m(X + Y), and if n > m this transformation
+             * reduces the magnitude of the larger scalar, on average by half. So by
+             * repeating this we will quickly zero out all but one exponent, which will
+             * be small. */
+            secp256k1_gej_add_var(&pt[second], &pt[first], &pt[second], NULL);  /* Y -> X + Y */
+            secp256k1_scalar_numsub(&sc[first], &sc[first], &sc[second]);  /* n -> n - m */
+        }
+        while (secp256k1_scalar_cmp_var(&sc[first], &sc[second]) >= 0);
+
+        if (secp256k1_scalar_is_zero(&sc[first])) {
+            first = MY_remove(&heap);
+        } else {
+            first = MY_replace(&heap, first);
+        }
+    }
+
+    VERIFY_CHECK(!secp256k1_scalar_is_zero(&sc[first]));
+
+    if (secp256k1_gej_is_infinity(&pt[first])) {
+        return;
+    }
+
+    /* Now the desired result is heap_sc[0] * heap_pt[0], and for random scalars it is
+     * very likely that heap_sc[0] = 1, and extremely likely heap_sc[0] < 5. (After
+     * about 100k trials I saw around 200 2's and one 3.) So use a binary ladder rather
+     * than any heavy machinery to finish it off. */
+    for (;;) {
+        if (secp256k1_scalar_shr_int(&sc[first], 1) == 1) {
+            secp256k1_gej_add_var(r, r, &pt[first], NULL);
+            if (secp256k1_scalar_is_zero(&sc[first])) {
+                break;
+            }
+        }
+        secp256k1_gej_double_nonzero(&pt[first], &pt[first], NULL);
+    }
+}
+
+#endif
+
 /* Heap operations: parent(i) = i/2; left_child(i) = 2*i; right_child(i) = 2*i + 1 */
 #define SWAP(i, j) (idx[i] ^= idx[j], idx[j] ^= idx[i], idx[i] ^= idx[j])
 static void secp256k1_heap_siftdown(const secp256k1_scalar *sc, unsigned char *idx, size_t n, size_t root_idx) {
@@ -45,6 +235,8 @@ static void secp256k1_heap_remove(const secp256k1_scalar *sc, unsigned char *idx
     /* sift the new root into place */
     secp256k1_heap_siftdown(sc, idx, *n, 1);
 }
+
+#if !MY_VERSION
 
 /** Multi-multiply: R = sum_i ni * Ai */
 static void secp256k1_ecmult_multi(secp256k1_gej *r, secp256k1_scalar *sc, secp256k1_gej *pt, size_t n) {
@@ -109,4 +301,6 @@ static void secp256k1_ecmult_multi(secp256k1_gej *r, secp256k1_scalar *sc, secp2
         }
     }
 }
+
+#endif
 
