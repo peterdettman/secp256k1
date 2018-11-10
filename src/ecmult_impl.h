@@ -200,8 +200,7 @@ static void secp256k1_ecmult_odd_multiples_table_storage_var(const int n, secp25
 
         /* For the remaining points, we extract the z-ratio from the stored
          * x-coordinate, compute its z^-1 from that, and compute the full
-         * point from that. The z-ratio for the next iteration is stored in
-         * the x-coordinate at the end of the loop. */
+         * point from that. */
         rzr = &p_ge.x;
         secp256k1_fe_mul(&zi, &zi, rzr);
         secp256k1_fe_sqr(&zi2, &zi);
