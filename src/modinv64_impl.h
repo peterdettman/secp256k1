@@ -253,6 +253,111 @@ static int64_t secp256k1_modinv64_divsteps_59(int64_t zeta, uint64_t f0, uint64_
     return zeta;
 }
 
+static int64_t secp256k1_modinv64_divsteps_60_var(int64_t zeta, uint64_t f0, uint64_t g0, secp256k1_modinv64_trans2x2 *t) {
+    int64_t c1 = zeta >> 63;
+    int64_t c2 = -(g0 & 1);
+    int64_t c3;
+
+    int64_t uvf = 0x3FFFFFFFE0000000LL | ((f0 >> 1) & 0x1FFFFFFFLL);
+    int64_t qrg = 0xE000000020000000LL | ((g0 >> 1) & 0x1FFFFFFFLL);
+    int64_t lsb = 0x2000000020000000LL;
+
+    int64_t f1, g1, t0, t1, t2;
+    int32_t u1, v1, q1, r1;
+    int32_t u2, v2, q2, r2;
+    int i;
+
+    for (i = 29;;) {
+        c3 = c1 & c2;
+        t0 = qrg - c2 + ((uvf ^ c1) & c2);
+        t1 = t0 - (lsb & c3);
+        t2 = uvf ^ ((uvf ^ qrg) & c3);
+
+        zeta = (zeta ^ c3) - 1;
+
+        if (i-- == 0) {
+            qrg = ~(t1 | lsb);
+            uvf = ~t2;
+            VERIFY_CHECK((qrg & lsb) == 0);
+            VERIFY_CHECK((uvf & lsb) == 0);
+            break;
+        }
+
+        c1 = zeta >> 63;
+        c2 = -(t0 & 1);
+
+        t1 >>= 1;
+        lsb >>= 1;
+
+        qrg = t1 | lsb;
+        uvf = t2 | lsb;
+    }
+
+    u1 = (int32_t)(uvf >> 32) << 1;
+    v1 = (int32_t)uvf << 1;
+    q1 = (int32_t)(qrg >> 32);
+    r1 = (int32_t)qrg;
+
+    f1 = u1 * f0 + v1 * g0;
+    g1 = q1 * f0 + r1 * g0;
+
+    VERIFY_CHECK((f1 & 0x7FFFFFFFLL) == 0);
+    VERIFY_CHECK((g1 & 0x7FFFFFFFLL) == 0);
+
+    if ((g1 & 0x1FFFFFFF80000000LL) == 0) {
+        t->u = -(int64_t)u1 << 31;
+        t->v = -(int64_t)v1 << 31;
+        t->q = -(int64_t)q1 << 1;
+        t->r = -(int64_t)r1 << 1;
+        return zeta - 30;
+    }
+
+    c1 = zeta >> 63;
+    c2 = (g1 << 32) >> 63;
+
+    uvf = 0x3FFFFFFFE0000000LL | ((f1 >> 32) & 0x1FFFFFFFLL);
+    qrg = 0xE000000020000000LL | ((g1 >> 32) & 0x1FFFFFFFLL);
+    lsb = 0x2000000020000000LL;
+
+    for (i = 29;;) {
+        c3 = c1 & c2;
+        t0 = qrg - c2 + ((uvf ^ c1) & c2);
+        t1 = t0 - (lsb & c3);
+        t2 = uvf ^ ((uvf ^ qrg) & c3);
+
+        zeta = (zeta ^ c3) - 1;
+
+        if (i-- == 0) {
+            qrg = ~(t1 | lsb);
+            uvf = ~t2;
+            VERIFY_CHECK((qrg & lsb) == 0);
+            VERIFY_CHECK((uvf & lsb) == 0);
+            break;
+        }
+
+        c1 = zeta >> 63;
+        c2 = -(t0 & 1);
+
+        t1 >>= 1;
+        lsb >>= 1;
+
+        qrg = t1 | lsb;
+        uvf = t2 | lsb;
+    }
+
+    u2 = (int32_t)(uvf >> 32) << 1;
+    v2 = (int32_t)uvf << 1;
+    q2 = (int32_t)(qrg >> 32);
+    r2 = (int32_t)qrg;
+
+    t->u = (int64_t)u2 * u1 + (int64_t)v2 * q1;
+    t->v = (int64_t)u2 * v1 + (int64_t)v2 * r1;
+    t->q = (int64_t)q2 * u1 + (int64_t)r2 * q1;
+    t->r = (int64_t)q2 * v1 + (int64_t)r2 * r1;
+
+    return zeta;
+}
+
 /* Compute the transition matrix and eta for 62 divsteps (variable time, eta=-delta).
  *
  * Input:  eta: initial eta
@@ -568,7 +673,7 @@ static void secp256k1_modinv64_var(secp256k1_modinv64_signed62 *x, const secp256
     while (1) {
         /* Compute transition matrix and new eta after 62 divsteps. */
         secp256k1_modinv64_trans2x2 t;
-        eta = secp256k1_modinv64_divsteps_62_var(eta, f.v[0], g.v[0], &t);
+        eta = secp256k1_modinv64_divsteps_60_var(eta, f.v[0], g.v[0], &t);
         /* Update d,e using that transition matrix. */
         secp256k1_modinv64_update_de_62(&d, &e, &t, modinfo);
         /* Update f,g using that transition matrix. */
@@ -603,7 +708,7 @@ static void secp256k1_modinv64_var(secp256k1_modinv64_signed62 *x, const secp256
             --len;
         }
 #ifdef VERIFY
-        VERIFY_CHECK(++i < 12); /* We should never need more than 12*62 = 744 divsteps */
+        VERIFY_CHECK(++i < 13); /* We should never need more than 744 (13*60 == 780) divsteps */
         VERIFY_CHECK(secp256k1_modinv64_mul_cmp_62(&f, len, &modinfo->modulus, -1) > 0); /* f > -modulus */
         VERIFY_CHECK(secp256k1_modinv64_mul_cmp_62(&f, len, &modinfo->modulus, 1) <= 0); /* f <= modulus */
         VERIFY_CHECK(secp256k1_modinv64_mul_cmp_62(&g, len, &modinfo->modulus, -1) > 0); /* g > -modulus */
