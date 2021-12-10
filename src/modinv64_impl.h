@@ -157,59 +157,99 @@ typedef struct {
  * Implements the divsteps_n_matrix function from the explanation.
  */
 static int64_t secp256k1_modinv64_divsteps_59(int64_t zeta, uint64_t f0, uint64_t g0, secp256k1_modinv64_trans2x2 *t) {
-    /* u,v,q,r are the elements of the transformation matrix being built up,
-     * starting with the identity matrix times 8 (because the caller expects
-     * a result scaled by 2^62). Semantically they are signed integers
-     * in range [-2^62,2^62], but here represented as unsigned mod 2^64. This
-     * permits left shifting (which is UB for negative numbers). The range
-     * being inside [-2^63,2^63) means that casting to signed works correctly.
-     */
-    uint64_t u = 8, v = 0, q = 0, r = 8;
-    uint64_t c1, c2, f = f0, g = g0, x, y, z;
+    int64_t c1 = zeta >> 63;
+    int64_t c2 = -(g0 & 1);
+    int64_t c3;
+
+    int64_t uvf = 0x3FFFFFFFE0000000LL | ((f0 >> 1) & 0x1FFFFFFFLL);
+    int64_t qrg = 0xE000000020000000LL | ((g0 >> 1) & 0x1FFFFFFFLL);
+    int64_t lsb = 0x2000000020000000LL;
+
+    int64_t f1, g1, t0, t1, t2;
+    int32_t u1, v1, q1, r1;
+    int32_t u2, v2, q2, r2;
     int i;
 
-    for (i = 3; i < 62; ++i) {
-        VERIFY_CHECK((f & 1) == 1); /* f must always be odd */
-        VERIFY_CHECK((u * f0 + v * g0) == f << i);
-        VERIFY_CHECK((q * f0 + r * g0) == g << i);
-        /* Compute conditional masks for (zeta < 0) and for (g & 1). */
+    for (i = 29;;) {
+        c3 = c1 & c2;
+        t0 = qrg - c2 + ((uvf ^ c1) & c2);
+        t1 = t0 - (lsb & c3);
+        t2 = uvf ^ ((uvf ^ qrg) & c3);
+
+        zeta = (zeta ^ c3) - 1;
+
+        if (i-- == 0) {
+            qrg = ~(t1 | lsb);
+            uvf = ~t2;
+            VERIFY_CHECK((qrg & lsb) == 0);
+            VERIFY_CHECK((uvf & lsb) == 0);
+            break;
+        }
+
         c1 = zeta >> 63;
-        c2 = -(g & 1);
-        /* Compute x,y,z, conditionally negated versions of f,u,v. */
-        x = (f ^ c1) - c1;
-        y = (u ^ c1) - c1;
-        z = (v ^ c1) - c1;
-        /* Conditionally add x,y,z to g,q,r. */
-        g += x & c2;
-        q += y & c2;
-        r += z & c2;
-        /* In what follows, c1 is a condition mask for (zeta < 0) and (g & 1). */
-        c1 &= c2;
-        /* Conditionally change zeta into -zeta-2 or zeta-1. */
-        zeta = (zeta ^ c1) - 1;
-        /* Conditionally add g,q,r to f,u,v. */
-        f += g & c1;
-        u += q & c1;
-        v += r & c1;
-        /* Shifts */
-        g >>= 1;
-        u <<= 1;
-        v <<= 1;
-        /* Bounds on zeta that follow from the bounds on iteration count (max 10*59 divsteps). */
-        VERIFY_CHECK(zeta >= -591 && zeta <= 591);
+        c2 = -(t0 & 1);
+
+        t1 >>= 1;
+        lsb >>= 1;
+
+        qrg = t1 | lsb;
+        uvf = t2 | lsb;
     }
-    /* Return data in t and return value. */
-    t->u = (int64_t)u;
-    t->v = (int64_t)v;
-    t->q = (int64_t)q;
-    t->r = (int64_t)r;
-    /* The determinant of t must be a power of two. This guarantees that multiplication with t
-     * does not change the gcd of f and g, apart from adding a power-of-2 factor to it (which
-     * will be divided out again). As each divstep's individual matrix has determinant 2, the
-     * aggregate of 59 of them will have determinant 2^59. Multiplying with the initial
-     * 8*identity (which has determinant 2^6) means the overall outputs has determinant
-     * 2^65. */
-    VERIFY_CHECK((int128_t)t->u * t->r - (int128_t)t->v * t->q == ((int128_t)1) << 65);
+
+    u1 = (int32_t)(uvf >> 32) << 1;
+    v1 = (int32_t)uvf << 1;
+    q1 = (int32_t)(qrg >> 32);
+    r1 = (int32_t)qrg;
+
+    f1 = u1 * f0 + v1 * g0;
+    g1 = q1 * f0 + r1 * g0;
+
+    VERIFY_CHECK((f1 & 0x7FFFFFFFLL) == 0);
+    VERIFY_CHECK((g1 & 0x7FFFFFFFLL) == 0);
+
+    c1 = zeta >> 63;
+    c2 = (g1 << 32) >> 63;
+
+    uvf = 0x3FFFFFFFF0000000LL | ((f1 >> 32) & 0x0FFFFFFFLL);
+    qrg = 0xF000000030000000LL | ((g1 >> 32) & 0x0FFFFFFFLL);
+    lsb = 0x1000000010000000LL;
+
+    for (i = 28;;) {
+        c3 = c1 & c2;
+        t0 = qrg - c2 + ((uvf ^ c1) & c2);
+        t1 = t0 - (lsb & c3);
+        t2 = uvf ^ ((uvf ^ qrg) & c3);
+
+        zeta = (zeta ^ c3) - 1;
+
+        if (i-- == 0) {
+            qrg = ~(t1 | lsb);
+            uvf = ~t2;
+            VERIFY_CHECK((qrg & lsb) == 0);
+            VERIFY_CHECK((uvf & lsb) == 0);
+            break;
+        }
+
+        c1 = zeta >> 63;
+        c2 = -(t0 & 1);
+
+        t1 >>= 1;
+        lsb >>= 1;
+
+        qrg = t1 | lsb;
+        uvf = t2 | lsb;
+    }
+
+    u2 = (int32_t)(uvf >> 32) << 1;
+    v2 = (int32_t)uvf << 1;
+    q2 = (int32_t)(qrg >> 32);
+    r2 = (int32_t)qrg;
+
+    t->u = (int64_t)u2 * u1 + (int64_t)v2 * q1;
+    t->v = (int64_t)u2 * v1 + (int64_t)v2 * r1;
+    t->q = (int64_t)q2 * u1 + (int64_t)r2 * q1;
+    t->r = (int64_t)q2 * v1 + (int64_t)r2 * r1;
+
     return zeta;
 }
 
