@@ -459,6 +459,24 @@ static void secp256k1_fe_sqr(secp256k1_fe *r, const secp256k1_fe *a) {
 #endif
 }
 
+static SECP256K1_INLINE void secp256k1_fe_cadd(secp256k1_fe *r, const secp256k1_fe *a, int flag) {
+    uint64_t mask = (uint64_t)0 - flag;
+#ifdef VERIFY
+    VG_CHECK_VERIFY(r->n, sizeof(r->n));
+    secp256k1_fe_verify(a);
+#endif
+    r->n[0] += a->n[0] & mask;
+    r->n[1] += a->n[1] & mask;
+    r->n[2] += a->n[2] & mask;
+    r->n[3] += a->n[3] & mask;
+    r->n[4] += a->n[4] & mask;
+#ifdef VERIFY
+    r->magnitude += a->magnitude;
+    r->normalized = 0;
+    secp256k1_fe_verify(r);
+#endif
+}
+
 static SECP256K1_INLINE void secp256k1_fe_cmov(secp256k1_fe *r, const secp256k1_fe *a, int flag) {
     uint64_t mask0, mask1;
     VG_CHECK_VERIFY(r->n, sizeof(r->n));
@@ -474,6 +492,20 @@ static SECP256K1_INLINE void secp256k1_fe_cmov(secp256k1_fe *r, const secp256k1_
         r->magnitude = a->magnitude;
         r->normalized = a->normalized;
     }
+#endif
+}
+
+static SECP256K1_INLINE void secp256k1_fe_czero(secp256k1_fe *r, int flag) {
+    uint64_t mask = flag + ~((uint64_t)0);
+    VG_CHECK_VERIFY(r->n, sizeof(r->n));
+    r->n[0] &= mask;
+    r->n[1] &= mask;
+    r->n[2] &= mask;
+    r->n[3] &= mask;
+    r->n[4] &= mask;
+#ifdef VERIFY
+    /* Magnitude and normalization unchanged */
+    secp256k1_fe_verify(r);
 #endif
 }
 
